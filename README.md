@@ -1,5 +1,7 @@
 # TON Direct Token Offering (DTO) in USDT
 
+**⚠️ WARNING: This code is under active development and is not recommended for use in production environments without thorough auditing and testing. ⚠️**
+
 A smart contract for the TON blockchain that facilitates direct token offerings at a fixed price. This contract allows token issuers to sell their tokens directly to investors without intermediaries, operating on a "first come, first served" basis.
 
 ## Features

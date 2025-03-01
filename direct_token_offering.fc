@@ -1,4 +1,5 @@
-#include "imports/stdlib.fc";
+;; Direct Token Offering Contract (USDT version)
+;; Enables exchanging USDT for project tokens at a fixed rate
 
 ;; Storage
 ;; storage#_ owner_address:MsgAddress
@@ -79,17 +80,6 @@ int get_mm_to_usdt_rate() method_id {
   
   ;; Calculate MM tokens to send (1 USDT = mm_to_usdt_rate MM)
   int mm_amount = amount * mm_to_usdt_rate;
-  
-  ;; Get MM token balance of this contract
-  cell state_init = begin_cell().store_uint(0, 32).store_slice(mm_address).end_cell();
-  cell get_balance_msg = begin_cell()
-    .store_uint(0x18, 6)
-    .store_slice(mm_address)
-    .store_coins(100000000) ;; 0.1 TON for gas
-    .store_uint(0, 1 + 4 + 4 + 64 + 32 + 1 + 1)
-    .store_uint(0x2c76b973, 32) ;; get_wallet_data
-    .store_uint(0, 64) ;; query_id
-    .end_cell();
   
   ;; Require minimum amount to prevent gas drain attacks
   ;; 1 TON = 1,000,000,000 nanoTON
@@ -207,6 +197,10 @@ int get_mm_to_usdt_rate() method_id {
   var (owner_address, usdt_address, mm_address, mm_to_usdt_rate, seqno) = load_data();
   
   ;; Parse the incoming message
+  if (in_msg.slice_bits() < 32) {
+    return (); ;; Empty message, probably just a money transfer
+  }
+  
   int op = in_msg~load_uint(32);
   
   ;; Handle different operations
@@ -217,18 +211,18 @@ int get_mm_to_usdt_rate() method_id {
   
   ;; Only process these operations if sender is the owner
   if (equal_slices(sender_address, owner_address)) {
-    if (op == 0x1234) { ;; withdraw USDT (custom op code)
+    if (op == 1) { ;; Change rate (op code 1)
+      change_rate(in_msg);
+      return ();
+    }
+    
+    if (op == 2) { ;; Withdraw USDT (op code 2)
       withdraw_usdt(in_msg);
       return ();
     }
     
-    if (op == 0x5678) { ;; withdraw MM (custom op code)
+    if (op == 3) { ;; Withdraw MM (op code 3)
       withdraw_mm(in_msg);
-      return ();
-    }
-    
-    if (op == 0x9abc) { ;; change rate (custom op code)
-      change_rate(in_msg);
       return ();
     }
     
