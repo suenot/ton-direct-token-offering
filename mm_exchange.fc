@@ -1,0 +1,258 @@
+#include "imports/stdlib.fc";
+
+;; Storage
+;; storage#_ owner_address:MsgAddress
+;;         usdt_address:MsgAddress
+;;         mm_address:MsgAddress
+;;         mm_to_usdt_rate:uint32
+;;         seqno:uint32 = Storage;
+
+(slice, slice, slice, int, int) load_data() inline {
+  var ds = get_data().begin_parse();
+  return (
+    ds~load_msg_addr(),  ;; owner_address
+    ds~load_msg_addr(),  ;; usdt_address
+    ds~load_msg_addr(),  ;; mm_address
+    ds~load_uint(32),    ;; mm_to_usdt_rate (2 in your case, meaning 1 USDT = 2 MM)
+    ds~load_uint(32)     ;; seqno
+  );
+}
+
+() save_data(slice owner_address, slice usdt_address, slice mm_address, int mm_to_usdt_rate, int seqno) impure inline {
+  set_data(begin_cell()
+    .store_slice(owner_address)
+    .store_slice(usdt_address)
+    .store_slice(mm_address)
+    .store_uint(mm_to_usdt_rate, 32)
+    .store_uint(seqno, 32)
+    .end_cell());
+}
+
+;; Get methods
+int seqno() method_id {
+  var (_, _, _, _, seq) = load_data();
+  return seq;
+}
+
+slice get_owner_address() method_id {
+  var (owner_address, _, _, _, _) = load_data();
+  return owner_address;
+}
+
+slice get_usdt_address() method_id {
+  var (_, usdt_address, _, _, _) = load_data();
+  return usdt_address;
+}
+
+slice get_mm_address() method_id {
+  var (_, _, mm_address, _, _) = load_data();
+  return mm_address;
+}
+
+int get_mm_to_usdt_rate() method_id {
+  var (_, _, _, mm_to_usdt_rate, _) = load_data();
+  return mm_to_usdt_rate;
+}
+
+;; Check if sender is the owner
+() check_owner() impure inline {
+  var (owner_address, _, _, _, _) = load_data();
+  throw_unless(401, equal_slices(sender_address(), owner_address));
+}
+
+;; Receive USDT and send MM tokens
+() on_receive_token(slice in_msg_body, slice sender_address, int msg_value) impure {
+  var (owner_address, usdt_address, mm_address, mm_to_usdt_rate, seqno) = load_data();
+  
+  ;; Check if the sender is the USDT token contract
+  throw_unless(402, equal_slices(sender_address, usdt_address));
+  
+  ;; Parse the notification message from USDT contract
+  ;; Format: op:uint32 query_id:uint64 amount:Coins from:MsgAddress
+  int op = in_msg_body~load_uint(32);
+  int query_id = in_msg_body~load_uint(64);
+  int amount = in_msg_body~load_coins();
+  slice from_address = in_msg_body~load_msg_addr();
+  
+  ;; Check if this is a token transfer notification (op = 0x7362d09c)
+  throw_unless(403, op == 0x7362d09c);
+  
+  ;; Calculate MM tokens to send (1 USDT = mm_to_usdt_rate MM)
+  int mm_amount = amount * mm_to_usdt_rate;
+  
+  ;; Get MM token balance of this contract
+  cell state_init = begin_cell().store_uint(0, 32).store_slice(mm_address).end_cell();
+  cell get_balance_msg = begin_cell()
+    .store_uint(0x18, 6)
+    .store_slice(mm_address)
+    .store_coins(100000000) ;; 0.1 TON for gas
+    .store_uint(0, 1 + 4 + 4 + 64 + 32 + 1 + 1)
+    .store_uint(0x2c76b973, 32) ;; get_wallet_data
+    .store_uint(0, 64) ;; query_id
+    .end_cell();
+  
+  ;; Require minimum amount to prevent gas drain attacks
+  ;; 1 TON = 1,000,000,000 nanoTON
+  ;; Minimum amount is 10 USDT (or equivalent in smallest units)
+  int min_amount = 10000000000; ;; 10 USDT in smallest units
+  throw_unless(404, amount >= min_amount);
+  
+  ;; Send MM tokens to the user
+  var msg = begin_cell()
+    .store_uint(0x18, 6)
+    .store_slice(mm_address)
+    .store_coins(200000000) ;; 0.2 TON for gas
+    .store_uint(0, 1 + 4 + 4 + 64 + 32 + 1 + 1)
+    .store_uint(0xf8a7ea5, 32) ;; transfer
+    .store_uint(query_id, 64) ;; query_id
+    .store_coins(mm_amount) ;; amount of MM tokens to send
+    .store_slice(from_address) ;; destination
+    .store_uint(0, 1) ;; no response message needed
+    .store_coins(0) ;; no forward amount
+    .store_uint(0, 1) ;; no forward payload
+    .end_cell();
+  
+  send_raw_message(msg, 1); ;; pay transfer fees separately
+  
+  save_data(owner_address, usdt_address, mm_address, mm_to_usdt_rate, seqno);
+}
+
+;; Owner can withdraw accumulated USDT
+() withdraw_usdt(slice in_msg_body) impure {
+  check_owner();
+  
+  var (owner_address, usdt_address, mm_address, mm_to_usdt_rate, seqno) = load_data();
+  
+  ;; Parse the withdrawal amount
+  int query_id = in_msg_body~load_uint(64);
+  int amount = in_msg_body~load_coins();
+  
+  ;; Send USDT to the owner
+  var msg = begin_cell()
+    .store_uint(0x18, 6)
+    .store_slice(usdt_address)
+    .store_coins(200000000) ;; 0.2 TON for gas
+    .store_uint(0, 1 + 4 + 4 + 64 + 32 + 1 + 1)
+    .store_uint(0xf8a7ea5, 32) ;; transfer
+    .store_uint(query_id, 64) ;; query_id
+    .store_coins(amount) ;; amount of USDT to withdraw
+    .store_slice(owner_address) ;; destination
+    .store_uint(0, 1) ;; no response message needed
+    .store_coins(0) ;; no forward amount
+    .store_uint(0, 1) ;; no forward payload
+    .end_cell();
+  
+  send_raw_message(msg, 1); ;; pay transfer fees separately
+  
+  save_data(owner_address, usdt_address, mm_address, mm_to_usdt_rate, seqno + 1);
+}
+
+;; Owner can withdraw remaining MM tokens
+() withdraw_mm(slice in_msg_body) impure {
+  check_owner();
+  
+  var (owner_address, usdt_address, mm_address, mm_to_usdt_rate, seqno) = load_data();
+  
+  ;; Parse the withdrawal amount
+  int query_id = in_msg_body~load_uint(64);
+  int amount = in_msg_body~load_coins();
+  
+  ;; Send MM tokens to the owner
+  var msg = begin_cell()
+    .store_uint(0x18, 6)
+    .store_slice(mm_address)
+    .store_coins(200000000) ;; 0.2 TON for gas
+    .store_uint(0, 1 + 4 + 4 + 64 + 32 + 1 + 1)
+    .store_uint(0xf8a7ea5, 32) ;; transfer
+    .store_uint(query_id, 64) ;; query_id
+    .store_coins(amount) ;; amount of MM tokens to withdraw
+    .store_slice(owner_address) ;; destination
+    .store_uint(0, 1) ;; no response message needed
+    .store_coins(0) ;; no forward amount
+    .store_uint(0, 1) ;; no forward payload
+    .end_cell();
+  
+  send_raw_message(msg, 1); ;; pay transfer fees separately
+  
+  save_data(owner_address, usdt_address, mm_address, mm_to_usdt_rate, seqno + 1);
+}
+
+;; Owner can change MM to USDT rate
+() change_rate(slice in_msg_body) impure {
+  check_owner();
+  
+  var (owner_address, usdt_address, mm_address, _, seqno) = load_data();
+  
+  ;; Parse the new rate
+  int query_id = in_msg_body~load_uint(64);
+  int new_rate = in_msg_body~load_uint(32);
+  
+  ;; Save data with new rate
+  save_data(owner_address, usdt_address, mm_address, new_rate, seqno + 1);
+}
+
+;; Main entry point
+() recv_internal(int msg_value, cell in_msg_cell, slice in_msg) impure {
+  slice cs = in_msg_cell.begin_parse();
+  int flags = cs~load_uint(4);
+  
+  ;; Ignore all bounced messages
+  if (flags & 1) {
+    return ();
+  }
+  
+  slice sender_address = cs~load_msg_addr();
+  
+  ;; Load data
+  var (owner_address, usdt_address, mm_address, mm_to_usdt_rate, seqno) = load_data();
+  
+  ;; Parse the incoming message
+  int op = in_msg~load_uint(32);
+  
+  ;; Handle different operations
+  if (op == 0x7362d09c) { ;; notification about incoming token transfer
+    on_receive_token(in_msg, sender_address, msg_value);
+    return ();
+  }
+  
+  ;; Only process these operations if sender is the owner
+  if (equal_slices(sender_address, owner_address)) {
+    if (op == 0x1234) { ;; withdraw USDT (custom op code)
+      withdraw_usdt(in_msg);
+      return ();
+    }
+    
+    if (op == 0x5678) { ;; withdraw MM (custom op code)
+      withdraw_mm(in_msg);
+      return ();
+    }
+    
+    if (op == 0x9abc) { ;; change rate (custom op code)
+      change_rate(in_msg);
+      return ();
+    }
+    
+    ;; If the message is from the owner and contains no op, it's a simple TON transfer
+    if (op == 0) {
+      return ();
+    }
+  }
+  
+  ;; If we get here, the message is not recognized
+  throw(0xffff);
+}
+
+;; Get initialization data
+(cell, cell) get_contract_data() method_id {
+  var (owner_address, usdt_address, mm_address, mm_to_usdt_rate, seqno) = load_data();
+  
+  cell data = begin_cell()
+    .store_slice(owner_address)
+    .store_slice(usdt_address)
+    .store_slice(mm_address)
+    .store_uint(mm_to_usdt_rate, 32)
+    .store_uint(seqno, 32)
+    .end_cell();
+  
+  return (data, null);
+}
