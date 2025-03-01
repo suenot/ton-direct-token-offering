@@ -1,58 +1,53 @@
-# MM Exchange TON Contract
+# TON Direct Token Offering (DTO)
 
-This is a TON blockchain smart contract that exchanges USDT tokens for MM (Marketmaker) tokens at a fixed rate.
+A smart contract for the TON blockchain that facilitates direct token offerings at a fixed price. This contract allows token issuers to sell their tokens directly to investors without intermediaries, operating on a "first come, first served" basis.
 
 ## Features
 
-- Accepts USDT tokens and sends MM tokens in return at a configurable rate (default: 1 USDT = 2 MM)
-- Handles cases where the contract doesn't have enough MM tokens to fulfill the exchange
-- Allows the owner to withdraw accumulated USDT tokens
-- Allows the owner to withdraw remaining MM tokens
-- Allows the owner to change the exchange rate at any time
+- Exchange USDT for project tokens at a fixed rate
+- Owner can withdraw accumulated USDT
+- Owner can withdraw remaining project tokens
+- Owner can change the exchange rate
+- Minimum transaction amount to prevent spam
+- Security checks to ensure proper operation
 
-## Contract Structure
+## How It Works
 
-The contract is written in FunC and consists of the following components:
+1. The contract owner deploys the contract with the following parameters:
+   - Owner wallet address
+   - USDT token address
+   - Project token address
+   - Exchange rate (how many project tokens per 1 USDT)
 
-- Storage for owner address, USDT token address, MM token address, exchange rate, and sequence number
-- Methods for receiving USDT tokens and sending MM tokens in return
-- Methods for the owner to withdraw accumulated USDT tokens
-- Methods for the owner to withdraw remaining MM tokens
-- Methods for the owner to change the exchange rate
-- Get methods for retrieving contract data
+2. The owner sends project tokens to the contract
 
-## Deployment
+3. Investors send USDT to the contract and automatically receive project tokens at the configured rate
 
-To deploy the contract, follow these steps:
+4. The owner can withdraw accumulated USDT at any time
 
-1. Install dependencies:
+## Setup
+
+1. Clone this repository
+2. Install dependencies:
 ```bash
 npm install
 ```
+3. Create a `.env` file based on the `.env.example` template
+4. Fill in your environment variables in the `.env` file
 
-2. Create a `.env` file based on the `.env.example` template:
+## Deployment
+
+To deploy the contract to the TON blockchain:
+
 ```bash
-cp .env.example .env
-```
-
-3. Update the `.env` file with your specific values:
-   - `OWNER_ADDRESS`: Your wallet address
-   - `USDT_ADDRESS`: The address of the USDT token contract in TON
-   - `MM_ADDRESS`: The address of the MM token contract in TON
-   - `MM_TO_USDT_RATE`: The exchange rate (default: 2, meaning 1 USDT = 2 MM)
-   - `MNEMONIC`: Your wallet's mnemonic phrase
-   - `TON_API_KEY`: Your TON API key
-
-4. Compile and deploy the contract:
-```bash
-npm run deploy
+npx ts-node deploy.ts
 ```
 
 ## Usage
 
-### For Users
+### For Investors
 
-Users can exchange USDT for MM tokens by sending USDT to the contract. The contract will automatically send MM tokens back to the user at the configured rate.
+Investors can participate in the token offering by sending USDT to the contract address. The minimum amount is 10 USDT.
 
 ### For Contract Owner
 
@@ -60,28 +55,28 @@ The contract owner can:
 
 1. Withdraw accumulated USDT tokens:
 ```typescript
-await mmExchange.sendWithdrawUSDT(provider, wallet.sender, {
+await dto.sendWithdrawUSDT(provider, wallet.sender, {
   amount: BigInt(1000000000) // Amount in nanoUSDT (1 USDT = 1,000,000,000 nanoUSDT)
 });
 ```
 
-2. Withdraw remaining MM tokens:
+2. Withdraw remaining project tokens:
 ```typescript
-await mmExchange.sendWithdrawMM(provider, wallet.sender, {
-  amount: BigInt(1000000000) // Amount in nanoMM (1 MM = 1,000,000,000 nanoMM)
+await dto.sendWithdrawProjectToken(provider, wallet.sender, {
+  amount: BigInt(1000000000) // Amount in nano tokens (1 token = 1,000,000,000 nano)
 });
 ```
 
 3. Change the exchange rate:
 ```typescript
-await mmExchange.sendChangeRate(provider, wallet.sender, {
-  newRate: 3 // New rate: 1 USDT = 3 MM
+await dto.sendChangeRate(provider, wallet.sender, {
+  newRate: 3 // New rate: 1 USDT = 3 project tokens
 });
 ```
 
 ### Maintenance Requirements
 
-The contract requires a balance of TON coins to function properly. TON is needed to pay for gas fees when processing transactions and sending tokens. Without sufficient TON, the contract will not be able to execute operations even if it has enough USDT or MM tokens.
+The contract requires a balance of TON coins to function properly. TON is needed to pay for gas fees when processing transactions and sending tokens. Without sufficient TON, the contract will not be able to execute operations even if it has enough USDT or project tokens.
 
 1. Initial TON balance:
    - The contract is deployed with 0.5 TON
@@ -101,12 +96,12 @@ Failure to maintain adequate TON balance may result in the contract being unable
 ## Security Considerations
 
 - The contract only accepts token transfers from the configured USDT token contract
-- Only the owner can withdraw accumulated USDT tokens or remaining MM tokens
+- Only the owner can withdraw accumulated USDT tokens or remaining project tokens
 - Only the owner can change the exchange rate
-- The contract checks if it has enough MM tokens to fulfill the exchange
+- The contract checks if it has enough project tokens to fulfill the exchange
 - The contract enforces a minimum transaction amount (10 USDT) to prevent gas drain attacks
 - All sensitive operations are protected by sender address verification
 
 ## License
 
-This project is licensed under the MIT License.
+MIT
